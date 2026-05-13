@@ -44,8 +44,8 @@ Both views are rendered as **GHL Custom Pages** inside the GHL UI. Neither is re
    ├── app/api/log/               (activity log read)
    ├── lib/ghl.ts                 (GHL API client + token refresh)
    ├── lib/ghl-sso.ts             (decode + verify GHL SSO key)
-   ├── lib/supabase.ts            (service-role Supabase client)
-   ├── lib/rate-limit.ts          (Supabase-backed per-user limiter)
+   ├── lib/db.ts                  (Postgres client via DATABASE_URL)
+   ├── lib/rate-limit.ts          (Postgres-backed per-user limiter)
    ├── lib/auth.ts                (withSso / withAdminSso route HOFs)
    └── lib/validation.ts          (zod schemas for inputs)
    ▼
@@ -172,7 +172,7 @@ Important: `locationId` is **never** taken from the request body or query string
 
 ## 8. lib/ structure
 
-- **`lib/supabase.ts`** — singleton service-role client. Reads `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`.
+- **`lib/db.ts`** — singleton DB client built from `DATABASE_URL` via the `postgres` package. Exports `getDb(): QueryClient` and the `QueryClient` interface tests use to swap in PGlite. Direct Postgres rather than `@supabase/supabase-js`/PostgREST so the same code path works against PGlite in tests and Supabase in production.
 - **`lib/ghl-sso.ts`** — `verifySso(token: string): SsoPayload | null`. Verifies HS256 JWT signature with `GHL_SSO_KEY` via `jsonwebtoken`. Returns null on any failure (invalid signature, expired, malformed). Fails closed — never throws.
 - **`lib/ghl.ts`** — `getGhlClient(locationId): { workflows.list(), contact.enroll(workflowId, contactId), ... }`. Internally: loads token from Supabase, refreshes on expiry-soon (60s buffer) OR on 401 retry, persists new token, returns typed methods. All calls target `https://services.leadconnectorhq.com` with header `Version: 2021-07-28`. Enrollment is `POST /contacts/{contactId}/workflow/{workflowId}` with body `{ eventStartTime: <ISO timestamp> }`.
 - **`lib/rate-limit.ts`** — `await checkRateLimit(locationId, userId)`. Calls `rate_limit_check()` Postgres function. Returns boolean. Use in `/api/enroll`.
@@ -242,9 +242,8 @@ Each phase is its own plan via the `superpowers:writing-plans` skill. We do not 
 NEXT_PUBLIC_APP_URL=
 GHL_CLIENT_ID=
 GHL_CLIENT_SECRET=
-GHL_SSO_KEY=            # shared secret for decrypting marketplace SSO tokens
-SUPABASE_URL=
-SUPABASE_SERVICE_ROLE_KEY=
+GHL_SSO_KEY=            # shared secret for verifying marketplace SSO JWTs (HS256)
+DATABASE_URL=           # full Postgres connection string (Supabase or local)
 ```
 
 Note: there is **no** `NEXT_PUBLIC_SUPABASE_*` — the client never talks to Supabase directly.
