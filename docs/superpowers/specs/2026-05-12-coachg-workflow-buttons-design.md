@@ -68,17 +68,17 @@ Both views are rendered as **GHL Custom Pages** inside the GHL UI. Neither is re
 GHL injects two pieces of data into Marketplace iframes:
 
 - **Query params** — `locationId`, `contactId`, `userId`, etc. **Useful hint, never trusted.**
-- **postMessage payload** with a `key` field — the **encrypted SSO key**. Decrypts (using `GHL_SSO_KEY` shared secret from the marketplace app config) to a JSON payload containing `userId`, `companyId`, `locationId`, `role`, `email`, etc.
+- **postMessage payload** with a `key` field — a **signed JWT** (HS256, signed by GHL with the app's SSO key from the Marketplace app settings). Payload contains at minimum `userId`, `companyId`, `locationId`, and `role`.
 
 Flow on iframe load:
 
 1. Iframe mounts. Client posts `{ message: 'REQUEST_USER_DATA' }` to `window.parent`.
-2. GHL responds with `{ key: '<encrypted-sso-token>' }`.
-3. Client stores the encrypted token (in component state, not localStorage).
-4. Every subsequent API call to our backend includes that token in an `X-GHL-SSO` header.
-5. Server decrypts it on every request, returns 401 if invalid/expired, and uses the decoded `locationId`/`userId`/`role` as the **only authoritative identity**.
+2. GHL responds with `{ key: '<signed-jwt>' }`.
+3. Client stores the JWT (in component state, not localStorage).
+4. Every subsequent API call to our backend includes that JWT in an `X-GHL-SSO` header.
+5. Server verifies the JWT signature with `GHL_SSO_KEY` using HS256. Returns 401 if signature invalid, token expired, or missing. Uses the verified `locationId`/`userId`/`role` from the payload as the **only authoritative identity**.
 
-`lib/ghl-sso.ts` is the single decode point. All route handlers route through it.
+`lib/ghl-sso.ts` is the single verification point. All route handlers route through it. Implementation uses `jsonwebtoken` (HS256, `verify` with `GHL_SSO_KEY`).
 
 ## 5. Roles & authorization
 
@@ -158,7 +158,7 @@ All routes (except `/api/oauth/callback`) require an `X-GHL-SSO` request header 
 
 | Route | Method | Auth | Behavior |
 |---|---|---|---|
-| `/api/oauth/callback` | GET | none (called by GHL during install) | Exchange `code` for tokens, upsert `ghl_tokens` row, redirect somewhere sensible. |
+| `/api/oauth/callback` | GET | none (called by GHL during install) | Exchange `code` for tokens, upsert `ghl_tokens` row, redirect to `/admin?locationId={locationId}` so the installer lands directly on their config page. |
 | `/api/workflows` | GET | SSO | Use OAuth token for `locationId` to fetch GHL workflows; return `[{id, name}]`. |
 | `/api/buttons` | GET | SSO | Return `buttons` rows for verified `locationId`, ordered by `sort_order`. |
 | `/api/buttons` | POST | SSO + admin | Create button. Validates with zod. |
@@ -173,8 +173,8 @@ Important: `locationId` is **never** taken from the request body or query string
 ## 8. lib/ structure
 
 - **`lib/supabase.ts`** — singleton service-role client. Reads `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`.
-- **`lib/ghl-sso.ts`** — `decodeSso(encrypted: string): SsoPayload | null`. Uses `GHL_SSO_KEY` shared secret. Returns null on any failure (don't throw — fail closed at the route handler).
-- **`lib/ghl.ts`** — `getGhlClient(locationId): { workflows.list, contact.enroll(workflowId, contactId), ... }`. Internally: loads token from Supabase, refreshes on expiry-soon (60s buffer) OR on 401 retry, persists new token, returns typed methods.
+- **`lib/ghl-sso.ts`** — `verifySso(token: string): SsoPayload | null`. Verifies HS256 JWT signature with `GHL_SSO_KEY` via `jsonwebtoken`. Returns null on any failure (invalid signature, expired, malformed). Fails closed — never throws.
+- **`lib/ghl.ts`** — `getGhlClient(locationId): { workflows.list(), contact.enroll(workflowId, contactId), ... }`. Internally: loads token from Supabase, refreshes on expiry-soon (60s buffer) OR on 401 retry, persists new token, returns typed methods. All calls target `https://services.leadconnectorhq.com` with header `Version: 2021-07-28`. Enrollment is `POST /contacts/{contactId}/workflow/{workflowId}` with body `{ eventStartTime: <ISO timestamp> }`.
 - **`lib/rate-limit.ts`** — `await checkRateLimit(locationId, userId)`. Calls `rate_limit_check()` Postgres function. Returns boolean. Use in `/api/enroll`.
 - **`lib/validation.ts`** — zod schemas for button create/update, enroll payload, etc.
 - **`lib/auth.ts`** — small wrapper: `withSso(handler)` and `withAdminSso(handler)` higher-order functions for route handlers.
@@ -249,12 +249,19 @@ SUPABASE_SERVICE_ROLE_KEY=
 
 Note: there is **no** `NEXT_PUBLIC_SUPABASE_*` — the client never talks to Supabase directly.
 
-## 14. Open questions / known unknowns
+## 14. Resolved decisions and deferred items
 
-1. **GHL SSO encryption algorithm.** The decode logic in `lib/ghl-sso.ts` must match what GHL's `postMessage` produces. Documented (in GHL devdocs) as AES-256-CBC with the shared key as the key — to be verified against actual marketplace output before phase 2.5 is marked done.
-2. **GHL workflow enrollment endpoint.** Spec assumes `POST /contacts/{contactId}/workflow/{workflowId}` (GHL API v2). To be verified against current GHL v2 docs before phase 5 implementation begins.
-3. **Encryption-at-rest for tokens.** Not in v1 scope; tokens stored as plain text in Supabase, protected by service-role key isolation. Acceptable for a personal/single-tenant marketplace app; revisit if app is published broadly.
-4. **OAuth callback redirect target.** After token exchange succeeds, where does GHL want us to land the user? Likely back to GHL itself. Confirm via GHL marketplace install flow during phase 2 implementation.
+Resolved during brainstorming:
+
+1. **GHL SSO format.** HS256-signed JWT. Verified with `jsonwebtoken.verify(token, GHL_SSO_KEY, { algorithms: ['HS256'] })`. Payload contains `userId`, `companyId`, `locationId`, `role`.
+2. **GHL workflow enrollment endpoint.** `POST https://services.leadconnectorhq.com/contacts/{contactId}/workflow/{workflowId}`. Headers: `Authorization: Bearer {accessToken}`, `Version: 2021-07-28`. Body: `{ "eventStartTime": "<ISO timestamp>" }`.
+3. **OAuth callback redirect target.** Redirect to `/admin?locationId={locationId}` so the installer lands directly on their config page.
+4. **OAuth redirect URI** registered in the GHL Marketplace app settings: `http://localhost:3000/api/oauth/callback` for local dev; the Vercel production URL gets added when the deployment is live.
+
+Deferred to v2 (flagged here so they don't get forgotten):
+
+- **Encryption-at-rest for OAuth tokens.** Not in v1 scope; protected by service-role key isolation only. Revisit if the app is published more broadly.
+- **GHL webhook handling.** No webhooks in v1. HMAC signature verification deferred to whenever we add the first webhook.
 
 ## 15. Non-goals for v1
 
