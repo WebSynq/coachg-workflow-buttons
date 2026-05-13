@@ -48,3 +48,26 @@ CREATE TRIGGER buttons_set_updated_at
   BEFORE UPDATE ON buttons
   FOR EACH ROW
   EXECUTE FUNCTION set_updated_at();
+
+-- Enrollment activity log. Append-only.
+CREATE TABLE activity_log (
+  id                     uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  location_id            text NOT NULL,
+  contact_id             text NOT NULL,
+  contact_name           text,
+  button_label           text NOT NULL,
+  workflow_id            text NOT NULL,
+  workflow_name          text NOT NULL,
+  triggered_by_user_id   text NOT NULL,
+  triggered_by_user_name text NOT NULL,
+  status                 text NOT NULL,
+  error_message          text,
+  triggered_at           timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT activity_log_status_valid CHECK (status IN ('success', 'error'))
+);
+
+CREATE INDEX activity_log_widget_idx
+  ON activity_log (location_id, contact_id, triggered_at DESC);
+
+CREATE INDEX activity_log_admin_idx
+  ON activity_log (location_id, triggered_at DESC);
