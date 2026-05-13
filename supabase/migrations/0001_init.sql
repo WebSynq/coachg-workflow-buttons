@@ -26,3 +26,25 @@ CREATE TRIGGER ghl_tokens_set_updated_at
   BEFORE UPDATE ON ghl_tokens
   FOR EACH ROW
   EXECUTE FUNCTION set_updated_at();
+
+-- Operator-configured buttons, scoped to a GHL location.
+CREATE TABLE buttons (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  location_id   text NOT NULL,
+  label         text NOT NULL,
+  color         text NOT NULL,
+  workflow_id   text NOT NULL,
+  workflow_name text NOT NULL,
+  sort_order    integer NOT NULL,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  updated_at    timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT buttons_label_length CHECK (char_length(label) <= 50),
+  CONSTRAINT buttons_color_format CHECK (color ~ '^#[0-9A-Fa-f]{6}$')
+);
+
+CREATE INDEX buttons_location_sort_idx ON buttons (location_id, sort_order);
+
+CREATE TRIGGER buttons_set_updated_at
+  BEFORE UPDATE ON buttons
+  FOR EACH ROW
+  EXECUTE FUNCTION set_updated_at();
