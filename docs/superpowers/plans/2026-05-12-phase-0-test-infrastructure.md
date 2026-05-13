@@ -214,9 +214,18 @@ Create at the repo root:
 
 ```ts
 import '@testing-library/jest-dom/vitest'
+import { afterEach } from 'vitest'
+import { cleanup } from '@testing-library/react'
+
+// Auto-cleanup between component tests. Necessary because Vitest's
+// globals: false means @testing-library/react's auto-cleanup can't
+// find afterEach on globalThis and won't self-register.
+afterEach(() => {
+  cleanup()
+})
 ```
 
-That single import registers all jest-dom matchers (`toBeInTheDocument`, `toHaveClass`, etc.) onto Vitest's `expect`.
+The first import registers all jest-dom matchers (`toBeInTheDocument`, `toHaveClass`, etc.) onto Vitest's `expect`. The `afterEach(cleanup)` block unmounts rendered components between tests — required under `globals: false`.
 
 - [ ] **Step 3: Wire `vitest.setup.ts` into `vitest.config.ts`**
 
