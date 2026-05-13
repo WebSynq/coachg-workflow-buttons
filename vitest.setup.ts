@@ -1,10 +1,13 @@
 import '@testing-library/jest-dom/vitest'
-import { afterEach } from 'vitest'
+import { afterAll, afterEach, beforeAll } from 'vitest'
 import { cleanup } from '@testing-library/react'
+import { server } from './test/msw-server'
 
-// Auto-cleanup between component tests. Necessary because Vitest's
-// globals: false means @testing-library/react's auto-cleanup can't
-// find afterEach on globalThis and won't self-register.
+beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
+
 afterEach(() => {
   cleanup()
+  server.resetHandlers()
 })
+
+afterAll(() => server.close())
