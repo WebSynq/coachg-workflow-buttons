@@ -42,7 +42,39 @@ describe('buttons table', () => {
       'sort_order',
       'created_at',
       'updated_at',
+      'sends_soa',
     ])
+  })
+
+  it('defaults sends_soa to true on a row that omits it', async () => {
+    db = await createTestDb()
+    await insertValidButton()
+    const { rows } = await db.query<{ sends_soa: boolean }>(
+      `SELECT sends_soa FROM buttons`,
+    )
+    expect(rows[0].sends_soa).toBe(true)
+  })
+
+  it('accepts sends_soa = false for non-SOA buttons', async () => {
+    db = await createTestDb()
+    await db.exec(`
+      INSERT INTO buttons (location_id, label, color, workflow_id, workflow_name, sort_order, sends_soa)
+      VALUES ('loc_1', 'Add to Drip', '#0066cc', 'wf_2', 'Email Drip', 0, false)
+    `)
+    const { rows } = await db.query<{ sends_soa: boolean }>(
+      `SELECT sends_soa FROM buttons`,
+    )
+    expect(rows[0].sends_soa).toBe(false)
+  })
+
+  it('rejects rows that explicitly set sends_soa to null', async () => {
+    db = await createTestDb()
+    await expect(
+      db.exec(`
+        INSERT INTO buttons (location_id, label, color, workflow_id, workflow_name, sort_order, sends_soa)
+        VALUES ('loc_1', 'Broken', '#000000', 'wf_3', 'X', 0, NULL)
+      `),
+    ).rejects.toThrow()
   })
 
   it('generates a uuid id by default', async () => {

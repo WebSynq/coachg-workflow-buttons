@@ -117,6 +117,7 @@ Activity log entries record the decoded `userId` and a human-readable `userName`
 | sort_order | integer | not null, not unique; admin UI keeps values contiguous on reorder |
 | created_at | timestamptz | default now() |
 | updated_at | timestamptz | default now() |
+| sends_soa | boolean | not null, default true. When true, `/api/enroll` populates `activity_log.soa_sent_at` on success. Added in migration `0003_add_sends_soa.sql`. |
 
 Index: `(location_id, sort_order)`.
 
@@ -136,7 +137,11 @@ Index: `(location_id, sort_order)`.
 | status | text | `success` or `error`, check constraint |
 | error_message | text | nullable |
 | triggered_at | timestamptz | default now(), indexed |
-| soa_sent_at | timestamptz | nullable; populated by `/api/enroll` on successful SOA-sending enrollment — see §1 Primary use case. Compliance paper-trail column added in migration `0002_add_soa_sent_at.sql`. |
+| soa_sent_at | timestamptz | nullable; populated by `/api/enroll` on successful enrollment when the corresponding `buttons.sends_soa` is true (Phase 5). See §1 Primary use case. Compliance paper-trail column added in migration `0002_add_soa_sent_at.sql`. |
+
+**SOA evidence model (v1).** `soa_sent_at` is set to `now()` at the moment GHL's workflow-enrollment endpoint returns 200 — that's our evidence that the operator triggered the SOA send. Delivery confirmation (GHL webhook fired after the workflow's actual PDF-send step) is deferred to v2.
+
+**Widget read query.** The widget shows ONE "SOA last sent: [date]" line per contact (NOT per button). The read is `SELECT max(soa_sent_at) FROM activity_log WHERE location_id = $1 AND contact_id = $2 AND soa_sent_at IS NOT NULL` — the partial index below makes it cheap.
 
 Indexes:
 - `(location_id, contact_id, triggered_at DESC)` — widget's last-5 query
