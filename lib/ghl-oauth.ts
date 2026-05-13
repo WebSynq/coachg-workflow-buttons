@@ -36,10 +36,21 @@ export async function exchangeCode(input: ExchangeCodeInput): Promise<ExchangeCo
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body,
+    // Bounded failure mode: surface a clean throw if GHL hangs, rather than
+    // waiting for Vercel's outer function timeout (10s+ on most plans).
+    signal: AbortSignal.timeout(10_000),
   })
 
   if (!res.ok) {
-    throw new Error(`GHL token exchange failed: ${res.status}`)
+    // Capture the response body so operational triage during a failed install
+    // can see the actual GHL error ({error, error_description}) instead of
+    // just the HTTP status. Falls back gracefully if reading the body throws.
+    const detail = await res.text().catch(() => '')
+    throw new Error(
+      detail
+        ? `GHL token exchange failed: ${res.status} ${detail}`
+        : `GHL token exchange failed: ${res.status}`,
+    )
   }
 
   const payload = (await res.json()) as Record<string, unknown>
