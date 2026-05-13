@@ -46,7 +46,48 @@ describe('activity_log table', () => {
       'status',
       'error_message',
       'triggered_at',
+      'soa_sent_at',
     ])
+  })
+
+  it('soa_sent_at is nullable and defaults to NULL on success rows', async () => {
+    db = await createTestDb()
+    await insertSuccessRow()
+    const { rows } = await db.query<{ soa_sent_at: string | null }>(
+      `SELECT soa_sent_at FROM activity_log`,
+    )
+    expect(rows[0].soa_sent_at).toBeNull()
+  })
+
+  it('accepts a row with soa_sent_at populated', async () => {
+    db = await createTestDb()
+    await db.exec(`
+      INSERT INTO activity_log (
+        location_id, contact_id, button_label, workflow_id, workflow_name,
+        triggered_by_user_id, triggered_by_user_name, status, soa_sent_at
+      )
+      VALUES (
+        'loc_1', 'con_1', 'Send SOA', 'wf_1', 'Send Scope of Appointment',
+        'usr_1', 'Tim', 'success', now()
+      )
+    `)
+    const { rows } = await db.query<{ soa_sent_at: string | null }>(
+      `SELECT soa_sent_at FROM activity_log`,
+    )
+    expect(rows[0].soa_sent_at).not.toBeNull()
+    const ageMs = Date.now() - new Date(rows[0].soa_sent_at!).getTime()
+    expect(ageMs).toBeLessThan(5000)
+  })
+
+  it('has a partial index for SOA last-sent lookups', async () => {
+    db = await createTestDb()
+    const { rows } = await db.query<{ indexdef: string }>(`
+      SELECT indexdef FROM pg_indexes
+      WHERE schemaname = 'public' AND tablename = 'activity_log'
+    `)
+    const defs = rows.map((r) => r.indexdef).join('\n')
+    expect(defs).toMatch(/\(location_id,\s*contact_id,\s*soa_sent_at DESC\)/)
+    expect(defs).toMatch(/WHERE \(?soa_sent_at IS NOT NULL\)?/i)
   })
 
   it('accepts a successful enrollment row', async () => {

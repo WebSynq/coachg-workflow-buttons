@@ -1,28 +1,18 @@
 import { PGlite } from '@electric-sql/pglite'
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import type { QueryClient } from '@/lib/db'
-
-const MIGRATION_PATH = join(
-  import.meta.dirname,
-  '..',
-  '..',
-  'supabase',
-  'migrations',
-  '0001_init.sql',
-)
+import { loadAllMigrations } from '../db/migrations'
 
 /**
- * Boots a fresh PGlite, applies the Phase 1 migration, and wraps it in the
- * QueryClient shape from lib/db.ts. Tests use this with `vi.doMock('@/lib/db', ...)`
- * to swap the production singleton for a test instance.
+ * Boots a fresh PGlite, applies every migration in `supabase/migrations/`
+ * (in sorted order), and wraps it in the QueryClient shape from lib/db.ts.
+ * Tests use this with `vi.doMock('@/lib/db', ...)` to swap the production
+ * singleton for a test instance.
  *
  * Always `await client.end()` in afterEach to release the WASM instance.
  */
 export async function createTestQueryClient(): Promise<QueryClient & { _pglite: PGlite }> {
   const pg = new PGlite()
-  const sql = readFileSync(MIGRATION_PATH, 'utf8')
-  await pg.exec(sql)
+  await pg.exec(loadAllMigrations())
 
   return {
     _pglite: pg,

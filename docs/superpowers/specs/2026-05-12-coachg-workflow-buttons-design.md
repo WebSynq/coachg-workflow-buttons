@@ -8,6 +8,8 @@
 
 CoachG Workflow Buttons is a GoHighLevel Marketplace App that injects an iframe widget into a contact record. The widget displays color-coded buttons. Each button enrolls the current contact into a configured GHL workflow with one click (plus a confirmation step). An activity log records every enrollment attempt, who triggered it, and the outcome.
 
+**Primary use case:** The main button action triggers a GHL workflow that generates and sends a Scope of Appointment (SOA) PDF to the contact. This is an insurance compliance requirement — the activity log is a legal paper trail. The widget surfaces "SOA last sent: [date]" under each button per contact so operators can see at a glance whether/when an SOA has already gone out.
+
 The app has two iframe views:
 
 - **`/widget`** — the contact-sidebar widget any GHL user can use to enroll the current contact.
@@ -134,8 +136,12 @@ Index: `(location_id, sort_order)`.
 | status | text | `success` or `error`, check constraint |
 | error_message | text | nullable |
 | triggered_at | timestamptz | default now(), indexed |
+| soa_sent_at | timestamptz | nullable; populated by `/api/enroll` on successful SOA-sending enrollment — see §1 Primary use case. Compliance paper-trail column added in migration `0002_add_soa_sent_at.sql`. |
 
-Index: `(location_id, contact_id, triggered_at DESC)` for the widget's last-5 query.
+Indexes:
+- `(location_id, contact_id, triggered_at DESC)` — widget's last-5 query
+- `(location_id, triggered_at DESC)` — admin's per-location history scan
+- Partial index `(location_id, contact_id, soa_sent_at DESC) WHERE soa_sent_at IS NOT NULL` — widget's "SOA last sent: [date]" lookup per contact
 
 ### `rate_limits`
 

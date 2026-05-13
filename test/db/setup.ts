@@ -1,15 +1,5 @@
 import { PGlite } from '@electric-sql/pglite'
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
-
-const MIGRATION_PATH = join(
-  import.meta.dirname,
-  '..',
-  '..',
-  'supabase',
-  'migrations',
-  '0001_init.sql',
-)
+import { loadAllMigrations } from './migrations'
 
 export async function createPgLite(): Promise<PGlite> {
   return new PGlite()
@@ -17,7 +7,6 @@ export async function createPgLite(): Promise<PGlite> {
 
 export async function createTestDb(): Promise<PGlite> {
   const db = await createPgLite()
-  const sql = readFileSync(MIGRATION_PATH, 'utf8')
-  await db.exec(sql)
+  await db.exec(loadAllMigrations())
   return db
 }
