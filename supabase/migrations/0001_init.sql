@@ -81,3 +81,28 @@ CREATE TABLE rate_limits (
   count        integer NOT NULL DEFAULT 1,
   PRIMARY KEY (location_id, user_id, window_start)
 );
+
+-- Atomic upsert + read for rate limiting. Returns true if the call is allowed
+-- (i.e., the new count is <= max). The same call also increments the bucket,
+-- so a single SELECT rate_limit_check(...) does both the spend and the check.
+CREATE OR REPLACE FUNCTION rate_limit_check(
+  p_location_id  text,
+  p_user_id      text,
+  p_max_per_min  integer
+)
+RETURNS boolean
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  current_window timestamptz := date_trunc('minute', now());
+  new_count      integer;
+BEGIN
+  INSERT INTO rate_limits (location_id, user_id, window_start, count)
+  VALUES (p_location_id, p_user_id, current_window, 1)
+  ON CONFLICT (location_id, user_id, window_start)
+  DO UPDATE SET count = rate_limits.count + 1
+  RETURNING count INTO new_count;
+
+  RETURN new_count <= p_max_per_min;
+END;
+$$;
