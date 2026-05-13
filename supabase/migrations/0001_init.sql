@@ -72,3 +72,12 @@ CREATE INDEX activity_log_widget_idx
 
 CREATE INDEX activity_log_admin_idx
   ON activity_log (location_id, triggered_at DESC);
+
+-- Per-user-per-location rate limit buckets, one row per minute.
+CREATE TABLE rate_limits (
+  location_id  text NOT NULL,
+  user_id      text NOT NULL,
+  window_start timestamptz NOT NULL,
+  count        integer NOT NULL DEFAULT 1,
+  PRIMARY KEY (location_id, user_id, window_start)
+);
