@@ -3,6 +3,12 @@ import { getEnv } from '@/lib/env'
 import { getDb } from '@/lib/db'
 import { exchangeCode } from '@/lib/ghl-oauth'
 
+// Subtract a clock-skew margin from the token expiry GHL reports.
+// Consumers (Phase 3's lib/ghl.ts) treat a token as expired if expires_at
+// is past, and we want to refresh before GHL's server-side clock thinks
+// it's expired, not just before ours does.
+const EXPIRY_BUFFER_SECONDS = 60
+
 export async function GET(request: NextRequest): Promise<Response> {
   const code = request.nextUrl.searchParams.get('code')
   if (!code) {
@@ -14,14 +20,22 @@ export async function GET(request: NextRequest): Promise<Response> {
   const clientSecret = getEnv('GHL_CLIENT_SECRET')
   const redirectUri = `${appUrl}/api/oauth/callback`
 
-  const tokens = await exchangeCode({
-    code,
-    redirectUri,
-    clientId,
-    clientSecret,
-  })
+  let tokens
+  try {
+    tokens = await exchangeCode({
+      code,
+      redirectUri,
+      clientId,
+      clientSecret,
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'GHL error'
+    return new Response(message, { status: 502 })
+  }
 
-  const expiresAt = new Date(Date.now() + tokens.expiresIn * 1000).toISOString()
+  const expiresAt = new Date(
+    Date.now() + (tokens.expiresIn - EXPIRY_BUFFER_SECONDS) * 1000,
+  ).toISOString()
 
   await getDb().query(
     `INSERT INTO ghl_tokens (location_id, access_token, refresh_token, expires_at)
@@ -31,6 +45,10 @@ export async function GET(request: NextRequest): Promise<Response> {
            refresh_token = EXCLUDED.refresh_token,
            expires_at = EXCLUDED.expires_at`,
     [tokens.locationId, tokens.accessToken, tokens.refreshToken, expiresAt],
+  )
+
+  console.log(
+    `[oauth/callback] upserted ghl_tokens for locationId=${tokens.locationId} expiresAt=${expiresAt}`,
   )
 
   return NextResponse.redirect(

@@ -57,4 +57,73 @@ describe('GET /api/oauth/callback', () => {
       { location_id: 'loc_abc', access_token: 'at_xyz', refresh_token: 'rt_xyz' },
     ])
   })
+
+  it('returns 400 when the code query param is missing', async () => {
+    db = await createTestQueryClient()
+    vi.doMock('@/lib/db', () => ({
+      getDb: () => db,
+      resetDbForTests: () => {},
+    }))
+
+    const { GET } = await import('@/app/api/oauth/callback/route')
+    const res = await GET(makeGet('/api/oauth/callback'))
+
+    expect(res.status).toBe(400)
+    expect(await res.text()).toBe('Missing code parameter')
+
+    const { rows } = await db.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM ghl_tokens`,
+    )
+    expect(rows[0].count).toBe('0')
+  })
+
+  it('returns 502 when GHL returns a non-2xx token response', async () => {
+    db = await createTestQueryClient()
+    vi.doMock('@/lib/db', () => ({
+      getDb: () => db,
+      resetDbForTests: () => {},
+    }))
+
+    server.use(
+      http.post('https://services.leadconnectorhq.com/oauth/token', () =>
+        HttpResponse.json({ error: 'invalid_grant' }, { status: 400 }),
+      ),
+    )
+
+    const { GET } = await import('@/app/api/oauth/callback/route')
+    const res = await GET(makeGet('/api/oauth/callback', { code: 'bad' }))
+
+    expect(res.status).toBe(502)
+    expect(await res.text()).toMatch(/GHL token exchange failed/)
+
+    const { rows } = await db.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM ghl_tokens`,
+    )
+    expect(rows[0].count).toBe('0')
+  })
+
+  it('returns 502 when GHL returns a malformed token response', async () => {
+    db = await createTestQueryClient()
+    vi.doMock('@/lib/db', () => ({
+      getDb: () => db,
+      resetDbForTests: () => {},
+    }))
+
+    server.use(
+      http.post('https://services.leadconnectorhq.com/oauth/token', () =>
+        HttpResponse.json({ access_token: 'only_this' }),
+      ),
+    )
+
+    const { GET } = await import('@/app/api/oauth/callback/route')
+    const res = await GET(makeGet('/api/oauth/callback', { code: 'abc' }))
+
+    expect(res.status).toBe(502)
+    expect(await res.text()).toMatch(/missing required field/)
+
+    const { rows } = await db.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM ghl_tokens`,
+    )
+    expect(rows[0].count).toBe('0')
+  })
 })
