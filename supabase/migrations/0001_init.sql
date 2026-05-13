@@ -49,7 +49,8 @@ CREATE TRIGGER buttons_set_updated_at
   FOR EACH ROW
   EXECUTE FUNCTION set_updated_at();
 
--- Enrollment activity log. Append-only.
+-- Enrollment activity log. Append-only by convention (write only via /api/enroll;
+-- not enforced at the schema level — see spec §14 deferred items).
 CREATE TABLE activity_log (
   id                     uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   location_id            text NOT NULL,
