@@ -18,7 +18,7 @@ export function ButtonTable({ buttons, onReorder, onEdit, onDelete }: ButtonTabl
   if (buttons.length === 0) {
     return (
       <p className="text-sm text-gray-500 py-4">
-        No buttons yet. Click "Add Button" to create one.
+        No buttons yet. Click &quot;Add Button&quot; to create one.
       </p>
     )
   }
