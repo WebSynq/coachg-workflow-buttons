@@ -122,4 +122,146 @@ describe('getGhlClient', () => {
       /no ghl_tokens row for locationId=missing_loc/,
     )
   })
+
+  it('on a 401 from workflows.list, refreshes the token, persists it, and retries once with the new bearer', async () => {
+    await seedToken({
+      locationId: 'loc3',
+      accessToken: 'at_stale',
+      refreshToken: 'rt_stale',
+      expiresAt: new Date(Date.now() + 600_000).toISOString(),
+    })
+
+    let workflowsHits = 0
+    let refreshHits = 0
+    const seenAuths: string[] = []
+    server.use(
+      http.post(TOKEN_URL, () => {
+        refreshHits++
+        return HttpResponse.json({
+          access_token: 'at_post_retry',
+          refresh_token: 'rt_post_retry',
+          expires_in: 3600,
+          locationId: 'loc3',
+        })
+      }),
+      http.get('https://services.leadconnectorhq.com/workflows/', ({ request }) => {
+        workflowsHits++
+        seenAuths.push(request.headers.get('Authorization') ?? '')
+        if (workflowsHits === 1) {
+          return HttpResponse.json({ error: 'unauthorized' }, { status: 401 })
+        }
+        return HttpResponse.json({ workflows: [{ id: 'wf1', name: 'X' }] })
+      }),
+    )
+
+    const { getGhlClient } = await import('@/lib/ghl')
+    const client = await getGhlClient('loc3')
+    const workflows = await client.workflows.list()
+
+    expect(workflows).toEqual([{ id: 'wf1', name: 'X' }])
+    expect(workflowsHits).toBe(2)
+    expect(refreshHits).toBe(1)
+    expect(seenAuths).toEqual(['Bearer at_stale', 'Bearer at_post_retry'])
+
+    const { rows } = await db!.query<{ access_token: string }>(
+      `SELECT access_token FROM ghl_tokens WHERE location_id = 'loc3'`,
+    )
+    expect(rows[0].access_token).toBe('at_post_retry')
+  })
+
+  it('does not loop: a second 401 after the retry is surfaced as an error', async () => {
+    await seedToken({
+      locationId: 'loc4',
+      accessToken: 'at_stale',
+      refreshToken: 'rt_stale',
+      expiresAt: new Date(Date.now() + 600_000).toISOString(),
+    })
+
+    let workflowsHits = 0
+    server.use(
+      http.post(TOKEN_URL, () =>
+        HttpResponse.json({
+          access_token: 'at_new',
+          refresh_token: 'rt_new',
+          expires_in: 3600,
+          locationId: 'loc4',
+        }),
+      ),
+      http.get('https://services.leadconnectorhq.com/workflows/', () => {
+        workflowsHits++
+        return HttpResponse.json({ error: 'still unauthorized' }, { status: 401 })
+      }),
+    )
+
+    const { getGhlClient } = await import('@/lib/ghl')
+    const client = await getGhlClient('loc4')
+
+    await expect(client.workflows.list()).rejects.toThrow(/GHL request failed: 401/)
+    expect(workflowsHits).toBe(2)
+  })
+
+  it('contact.enroll posts the documented body shape to the documented path and retries once on 401', async () => {
+    await seedToken({
+      locationId: 'loc5',
+      accessToken: 'at_stale',
+      refreshToken: 'rt_stale',
+      expiresAt: new Date(Date.now() + 600_000).toISOString(),
+    })
+
+    let enrollHits = 0
+    let lastBody: unknown = null
+    server.use(
+      http.post(TOKEN_URL, () =>
+        HttpResponse.json({
+          access_token: 'at_fresh',
+          refresh_token: 'rt_fresh',
+          expires_in: 3600,
+          locationId: 'loc5',
+        }),
+      ),
+      http.post(
+        'https://services.leadconnectorhq.com/contacts/:contactId/workflow/:workflowId',
+        async ({ request, params }) => {
+          enrollHits++
+          if (enrollHits === 1) {
+            return HttpResponse.json({}, { status: 401 })
+          }
+          expect(params.contactId).toBe('contact-xyz')
+          expect(params.workflowId).toBe('wf-abc')
+          lastBody = await request.json()
+          return HttpResponse.json({}, { status: 200 })
+        },
+      ),
+    )
+
+    const { getGhlClient } = await import('@/lib/ghl')
+    const client = await getGhlClient('loc5')
+    await client.contact.enroll('wf-abc', 'contact-xyz')
+
+    expect(enrollHits).toBe(2)
+    expect(lastBody).toEqual({
+      eventStartTime: expect.stringMatching(
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/,
+      ),
+    })
+  })
+
+  it('surfaces a refresh failure (refresh endpoint returns 400) as a clean error', async () => {
+    await seedToken({
+      locationId: 'loc6',
+      accessToken: 'at_old',
+      refreshToken: 'rt_revoked',
+      expiresAt: new Date(Date.now() + 10_000).toISOString(),
+    })
+
+    server.use(
+      http.post(TOKEN_URL, () =>
+        HttpResponse.json({ error: 'invalid_grant' }, { status: 400 }),
+      ),
+    )
+
+    const { getGhlClient } = await import('@/lib/ghl')
+
+    await expect(getGhlClient('loc6')).rejects.toThrow(/GHL token refresh failed: 400/)
+  })
 })
