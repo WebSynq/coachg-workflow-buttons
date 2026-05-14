@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { buttonCreateSchema, buttonUpdateSchema, buttonReorderSchema } from './validation'
+import {
+  buttonCreateSchema,
+  buttonUpdateSchema,
+  buttonReorderSchema,
+  enrollSchema,
+  logQuerySchema,
+} from './validation'
 
 const ok = {
   label: 'SOA',
@@ -102,5 +108,81 @@ describe('buttonReorderSchema', () => {
         items: [{ id: 'a1b2c3d4-e5f6-4789-9abc-1a2b3c4d5e6f', sortOrder: 1.5 }],
       }).success,
     ).toBe(false)
+  })
+})
+
+describe('enrollSchema', () => {
+  const goodId = 'a1b2c3d4-e5f6-4789-9abc-1a2b3c4d5e6f'
+
+  it('accepts the documented happy path with all fields', () => {
+    const r = enrollSchema.safeParse({
+      buttonId: goodId,
+      contactId: 'ctc-1',
+      contactName: 'Jane Doe',
+    })
+    expect(r.success).toBe(true)
+  })
+
+  it('accepts when contactName is omitted (DB column is nullable)', () => {
+    const r = enrollSchema.safeParse({ buttonId: goodId, contactId: 'ctc-1' })
+    expect(r.success).toBe(true)
+  })
+
+  it('rejects a non-uuid buttonId', () => {
+    expect(
+      enrollSchema.safeParse({ buttonId: 'not-a-uuid', contactId: 'c' }).success,
+    ).toBe(false)
+  })
+
+  it('rejects an empty contactId', () => {
+    expect(
+      enrollSchema.safeParse({ buttonId: goodId, contactId: '' }).success,
+    ).toBe(false)
+  })
+
+  it('rejects unknown keys (strict)', () => {
+    expect(
+      enrollSchema.safeParse({
+        buttonId: goodId,
+        contactId: 'c',
+        locationId: 'sneaky',
+      }).success,
+    ).toBe(false)
+  })
+})
+
+describe('logQuerySchema', () => {
+  it('parses string limit/offset (z.coerce) from URL query params', () => {
+    const r = logQuerySchema.safeParse({ limit: '50', offset: '100' })
+    expect(r.success).toBe(true)
+    if (r.success) expect(r.data).toEqual({ limit: 50, offset: 100 })
+  })
+
+  it('defaults limit=20 and offset=0 when both omitted', () => {
+    const r = logQuerySchema.safeParse({})
+    expect(r.success).toBe(true)
+    if (r.success) expect(r.data).toEqual({ limit: 20, offset: 0 })
+  })
+
+  it('accepts an optional contactId', () => {
+    const r = logQuerySchema.safeParse({ contactId: 'ctc-1' })
+    expect(r.success).toBe(true)
+    if (r.success) expect(r.data.contactId).toBe('ctc-1')
+  })
+
+  it('rejects a negative offset', () => {
+    expect(logQuerySchema.safeParse({ offset: '-1' }).success).toBe(false)
+  })
+
+  it('rejects limit > 100', () => {
+    expect(logQuerySchema.safeParse({ limit: '101' }).success).toBe(false)
+  })
+
+  it('rejects limit < 1', () => {
+    expect(logQuerySchema.safeParse({ limit: '0' }).success).toBe(false)
+  })
+
+  it('rejects an empty-string contactId', () => {
+    expect(logQuerySchema.safeParse({ contactId: '' }).success).toBe(false)
   })
 })
