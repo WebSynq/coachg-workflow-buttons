@@ -71,3 +71,57 @@ export async function exchangeCode(input: ExchangeCodeInput): Promise<ExchangeCo
 
   return { accessToken, refreshToken, expiresIn, locationId }
 }
+
+export interface RefreshInput {
+  refreshToken: string
+  clientId: string
+  clientSecret: string
+}
+
+/**
+ * Exchange a refresh token for a fresh access/refresh pair.
+ * Same response shape as exchangeCode — caller persists the new tuple
+ * and the new `expires_at` to ghl_tokens.
+ */
+export async function refreshAccessToken(input: RefreshInput): Promise<ExchangeCodeResult> {
+  const body = new URLSearchParams({
+    client_id: input.clientId,
+    client_secret: input.clientSecret,
+    grant_type: 'refresh_token',
+    refresh_token: input.refreshToken,
+  })
+
+  const res = await fetch(TOKEN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body,
+    signal: AbortSignal.timeout(10_000),
+  })
+
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '')
+    throw new Error(
+      detail
+        ? `GHL token refresh failed: ${res.status} ${detail}`
+        : `GHL token refresh failed: ${res.status}`,
+    )
+  }
+
+  const payload = (await res.json()) as Record<string, unknown>
+
+  const accessToken = payload.access_token
+  const refreshToken = payload.refresh_token
+  const expiresIn = payload.expires_in
+  const locationId = payload.locationId
+
+  if (
+    typeof accessToken !== 'string' ||
+    typeof refreshToken !== 'string' ||
+    typeof expiresIn !== 'number' ||
+    typeof locationId !== 'string'
+  ) {
+    throw new Error('GHL token response missing required field')
+  }
+
+  return { accessToken, refreshToken, expiresIn, locationId }
+}
