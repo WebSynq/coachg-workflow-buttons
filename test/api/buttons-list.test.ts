@@ -35,7 +35,7 @@ describe('GET /api/buttons', () => {
 
   async function mountDb() {
     db = await createTestQueryClient()
-    vi.doMock('@/lib/db', () => ({ getDb: () => db, resetDbForTests: () => {} }))
+    vi.doMock('@/lib/db', () => ({ getDb: () => db, getTenantDb: () => db, resetDbForTests: () => {} }))
   }
 
   it('returns 401 when the X-GHL-SSO header is missing', async () => {

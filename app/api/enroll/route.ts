@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server'
-import { getDb } from '@/lib/db'
+import { getTenantDb } from '@/lib/db'
 import { withSso } from '@/lib/auth'
 import { enrollSchema } from '@/lib/validation'
 import { checkRateLimit } from '@/lib/rate-limit'
@@ -64,7 +64,7 @@ export const POST = withSso(async (req: NextRequest, sso) => {
   const allowed = await checkRateLimit(sso.locationId, sso.userId)
   if (!allowed) return Response.json({ error: 'rate_limit' }, { status: 429 })
 
-  const db = getDb()
+  const db = getTenantDb(sso.locationId)
   const { rows: btnRows } = await db.query<ButtonRow>(
     `SELECT workflow_id, workflow_name, label, sends_soa
      FROM buttons WHERE id = $1 AND location_id = $2`,

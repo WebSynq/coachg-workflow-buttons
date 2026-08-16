@@ -14,7 +14,7 @@ describe('checkRateLimit', () => {
 
   async function mountDb() {
     db = await createTestQueryClient()
-    vi.doMock('@/lib/db', () => ({ getDb: () => db, resetDbForTests: () => {} }))
+    vi.doMock('@/lib/db', () => ({ getDb: () => db, getTenantDb: () => db, resetDbForTests: () => {} }))
   }
 
   it('returns true for calls 1 through 10 within the same minute', async () => {

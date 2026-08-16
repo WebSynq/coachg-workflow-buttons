@@ -1,4 +1,4 @@
-import postgres from 'postgres'
+import postgres, { type Sql } from 'postgres'
 import { getEnv } from './env'
 
 /**
@@ -14,21 +14,33 @@ export interface QueryClient {
   end(): Promise<void>
 }
 
-let cached: QueryClient | null = null
+let cachedSql: Sql | null = null
+let cachedDb: QueryClient | null = null
 
 /**
- * Production DB client backed by the `postgres` driver. Cached as a singleton
- * for the process lifetime. Reads DATABASE_URL on first call so test code
- * can override the env first.
+ * The single `postgres` connection pool for the process lifetime, shared by
+ * getDb() and every getTenantDb() call. Reads DATABASE_URL on first call so
+ * test code can override the env first.
+ */
+function getSql(): Sql {
+  if (cachedSql) return cachedSql
+  const url = getEnv('DATABASE_URL')
+  cachedSql = postgres(url, { prepare: false })
+  return cachedSql
+}
+
+/**
+ * Untenanted DB client for pre-tenant work (the OAuth callback, before a
+ * locationId exists to scope to). Every other caller should use
+ * getTenantDb() so RLS has a location_id to check.
  *
  * Tests that mutate DATABASE_URL between cases MUST call resetDbForTests()
  * in afterEach, or the cached client will leak across tests with the old URL.
  */
 export function getDb(): QueryClient {
-  if (cached) return cached
-  const url = getEnv('DATABASE_URL')
-  const sql = postgres(url, { prepare: false })
-  cached = {
+  if (cachedDb) return cachedDb
+  const sql = getSql()
+  cachedDb = {
     async query<T = Record<string, unknown>>(text: string, params?: unknown[]) {
       // `postgres` types unsafe()'s params as a union of driver-specific
       // serializable values; we pass plain primitives + ISO date strings, so
@@ -41,16 +53,43 @@ export function getDb(): QueryClient {
       await sql.end()
     },
   }
-  return cached
+  return cachedDb
 }
 
 /**
- * Test-only escape hatch: closes the cached client and clears the singleton
- * so the next getDb() call re-reads DATABASE_URL. Used by tests that mutate
- * process.env between cases. Fire-and-forget close avoids forcing callers
- * to await — the next test gets a fresh client either way.
+ * Tenant-scoped DB client. Each query() runs inside sql.begin() and sets the
+ * `app.location_id` GUC via set_config(..., true) — the third arg makes it
+ * transaction-local, same as SET LOCAL — before the caller's statement, so
+ * RLS policies see the right tenant and a pooled connection can never leak
+ * tenant context into the next request. set_config() over string-interpolated
+ * SET LOCAL because SET does not accept bind parameters; set_config() does.
+ */
+export function getTenantDb(locationId: string): QueryClient {
+  const sql = getSql()
+  return {
+    async query<T = Record<string, unknown>>(text: string, params?: unknown[]) {
+      const rows = await sql.begin(async (tx) => {
+        await tx.unsafe(`SELECT set_config('app.location_id', $1, true)`, [
+          locationId,
+        ] as never)
+        return (await tx.unsafe<T[]>(text, params as never)) as T[]
+      })
+      return { rows: rows as T[] }
+    },
+    async end() {
+      await sql.end()
+    },
+  }
+}
+
+/**
+ * Test-only escape hatch: closes the cached pool and clears both singletons
+ * so the next getDb()/getTenantDb() call re-reads DATABASE_URL. Used by tests
+ * that mutate process.env between cases. Fire-and-forget close avoids forcing
+ * callers to await — the next test gets a fresh client either way.
  */
 export function resetDbForTests(): void {
-  cached?.end().catch(() => {})
-  cached = null
+  cachedSql?.end().catch(() => {})
+  cachedSql = null
+  cachedDb = null
 }

@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server'
-import { getDb } from '@/lib/db'
+import { getTenantDb } from '@/lib/db'
 import { withSso } from '@/lib/auth'
 import { logQuerySchema } from '@/lib/validation'
 
@@ -51,7 +51,7 @@ export const GET = withSso(async (req: NextRequest, sso) => {
     )
   }
   const q = parsed.data
-  const db = getDb()
+  const db = getTenantDb(sso.locationId)
 
   if (q.contactId) {
     const { rows } = await db.query<ActivityRow>(

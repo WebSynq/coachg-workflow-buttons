@@ -70,7 +70,7 @@ describe('POST /api/enroll', () => {
 
   async function mountDb() {
     db = await createTestQueryClient()
-    vi.doMock('@/lib/db', () => ({ getDb: () => db, resetDbForTests: () => {} }))
+    vi.doMock('@/lib/db', () => ({ getDb: () => db, getTenantDb: () => db, resetDbForTests: () => {} }))
   }
 
   it('returns 401 without an SSO header', async () => {

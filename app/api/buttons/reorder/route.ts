@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server'
-import { getDb } from '@/lib/db'
+import { getTenantDb } from '@/lib/db'
 import { withAdminSso } from '@/lib/auth'
 import { buttonReorderSchema } from '@/lib/validation'
 
@@ -24,7 +24,7 @@ export const POST = withAdminSso(async (req: NextRequest, sso) => {
   // mutate anything. This replaces a per-row UPDATE-in-tx pattern that
   // wouldn't be atomic through the postgres connection pool.
   const ids = items.map(i => i.id)
-  const db = getDb()
+  const db = getTenantDb(sso.locationId)
   const { rows: validRows } = await db.query<{ id: string }>(
     `SELECT id FROM buttons WHERE id = ANY($1::uuid[]) AND location_id = $2`,
     [ids, sso.locationId],

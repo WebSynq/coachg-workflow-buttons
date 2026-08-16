@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server'
-import { getDb } from '@/lib/db'
+import { getTenantDb } from '@/lib/db'
 import { withSso, withAdminSso } from '@/lib/auth'
 import { buttonCreateSchema } from '@/lib/validation'
 
@@ -26,7 +26,7 @@ function rowToJson(r: ButtonRow) {
 }
 
 export const GET = withSso(async (_req: NextRequest, sso) => {
-  const { rows } = await getDb().query<ButtonRow>(
+  const { rows } = await getTenantDb(sso.locationId).query<ButtonRow>(
     `SELECT id, label, color, workflow_id, workflow_name, sort_order, sends_soa
      FROM buttons
      WHERE location_id = $1
@@ -52,7 +52,7 @@ export const POST = withAdminSso(async (req: NextRequest, sso) => {
   }
 
   const input = parsed.data
-  const { rows } = await getDb().query<ButtonRow>(
+  const { rows } = await getTenantDb(sso.locationId).query<ButtonRow>(
     `INSERT INTO buttons (location_id, label, color, workflow_id, workflow_name, sort_order, sends_soa)
      SELECT $1, $2, $3, $4, $5, COALESCE((SELECT MAX(sort_order) + 1 FROM buttons WHERE location_id = $1), 0), $6
      RETURNING id, label, color, workflow_id, workflow_name, sort_order, sends_soa`,

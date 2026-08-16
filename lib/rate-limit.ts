@@ -1,4 +1,4 @@
-import { getDb } from './db'
+import { getTenantDb } from './db'
 
 const MAX_PER_MIN = 10
 
@@ -10,7 +10,7 @@ const MAX_PER_MIN = 10
  * increment and the check.
  */
 export async function checkRateLimit(locationId: string, userId: string): Promise<boolean> {
-  const { rows } = await getDb().query<{ allowed: boolean }>(
+  const { rows } = await getTenantDb(locationId).query<{ allowed: boolean }>(
     `SELECT rate_limit_check($1, $2, $3) AS allowed`,
     [locationId, userId, MAX_PER_MIN],
   )

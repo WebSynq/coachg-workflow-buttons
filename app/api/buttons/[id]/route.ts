@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server'
-import { getDb } from '@/lib/db'
+import { getTenantDb } from '@/lib/db'
 import { withAdminSso } from '@/lib/auth'
 import { buttonUpdateSchema } from '@/lib/validation'
 
@@ -45,7 +45,7 @@ export const PUT = withAdminSso<[RouteCtx]>(async (req: NextRequest, sso, ctx) =
   }
   const input = parsed.data
 
-  const { rows } = await getDb().query<ButtonRow>(
+  const { rows } = await getTenantDb(sso.locationId).query<ButtonRow>(
     `UPDATE buttons
        SET label = $3, color = $4, workflow_id = $5, workflow_name = $6, sends_soa = $7
      WHERE id = $1 AND location_id = $2
@@ -66,7 +66,7 @@ export const PUT = withAdminSso<[RouteCtx]>(async (req: NextRequest, sso, ctx) =
 
 export const DELETE = withAdminSso<[RouteCtx]>(async (_req: NextRequest, sso, ctx) => {
   const { id } = await ctx.params
-  const { rows } = await getDb().query<{ id: string }>(
+  const { rows } = await getTenantDb(sso.locationId).query<{ id: string }>(
     `DELETE FROM buttons WHERE id = $1 AND location_id = $2 RETURNING id`,
     [id, sso.locationId],
   )
